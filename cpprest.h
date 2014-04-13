@@ -6,7 +6,6 @@
 *	@date	12/04/2014
 */
 #include <string>
-#include <vector>
 #include <map>
 
 namespace CppRest
@@ -30,11 +29,11 @@ namespace CppRest
 		bool bUseSSL;
 		std::wstring wszVerb;
 		std::map<std::wstring,std::wstring> mHeaders;
+		std::map<std::wstring,std::wstring> mResponse;
 	};
 
-	CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters* const SParams, std::map<std::wstring, std::wstring>& mResponse, bool bLoginUser=true);
+	CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters& SParams,
+                                  bool bLoginUser=true);
 }
 
-bool UserLogin(std::wstring& wszOAuthToken);
-
-CppRest::ApiResult GetOAuthToken(const std::wstring& wszEmail, const std::wstring& wszPassword, std::wstring& wszOAuthToken);
+bool UserLogin(const CppRest::SWinHttpParameters& SParams);

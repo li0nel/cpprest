@@ -27,9 +27,12 @@ std::map<std::string, std::string> json2map(const std::string& szJSON) {
 	std::istringstream is(szJSON);
 	boost::property_tree::read_json(is, pt2);
 	std::string foo = pt2.get<std::string>("foo");
+    
+    return;
 }
 
-CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters* const SParams, std::map<std::wstring,std::wstring>& mResponse, bool bLoginUser)
+CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters& SParams,
+                              bool bLoginUser)
 {
 	DWORD dwStatusCode = 0;
 	DWORD dwSupportedSchemes;
@@ -56,34 +59,34 @@ CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters* const SParams, 
 		WINHTTP_NO_PROXY_NAME,
 		WINHTTP_NO_PROXY_BYPASS, 0);
 
-	INTERNET_PORT nPort = (SParams->bUseSSL) ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
+	INTERNET_PORT nPort = (SParams.bUseSSL) ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
 
 	// Specify an HTTP server.
 	if (hSession)
 		hConnect = WinHttpConnect(hSession,
-		SParams->wszServer.c_str(),
+		SParams.wszServer.c_str(),
 		nPort, 0);
 
 	// Create an HTTP request handle.
 	if (hConnect)
 		hRequest = WinHttpOpenRequest(hConnect,
-		SParams->wszVerb.c_str(),
-		SParams->wszPath.c_str(),
+		SParams.wszVerb.c_str(),
+		SParams.wszPath.c_str(),
 		NULL,
 		WINHTTP_NO_REFERER,
 		WINHTTP_DEFAULT_ACCEPT_TYPES,
-		(SParams->bUseSSL) ? WINHTTP_FLAG_SECURE : 0);
+		(SParams.bUseSSL) ? WINHTTP_FLAG_SECURE : 0);
 
 	// Add headers
-	if (hRequest && SParams->mHeaders.size() != 0)
+	if (hRequest && SParams.mHeaders.size() != 0)
 	{
 		std::wstring wszHeaders(L"");
-		for (std::map<std::wstring, std::wstring>::iterator it = SParams->mHeaders.begin(); it != SParams->mHeaders.end(); it++)
+		for (std::map<std::wstring, std::wstring>::iterator it = SParams.mHeaders.begin(); it != SParams.mHeaders.end(); it++)
 		{
 			wszHeaders.append(it->first);
 			wszHeaders.append(L": ");
 			wszHeaders.append(it->second);
-			if (std::next(it,1) != SParams->mHeaders.end())
+			if (std::next(it,1) != SParams.mHeaders.end())
 				wszHeaders.append(L"\r\n");
 		}
 		
@@ -188,23 +191,17 @@ CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters* const SParams, 
 
 				if (bLoginUser)
 				{
-					result = UserLogin(wszOAuthToken)); //retrieve OAuthToken to token endpoint
+                    CppRest::SWinHttpParameters SParams2(SParams);
+
+					result = UserLogin(SParams2); //retrieve OAuthToken from token endpoint
 
 					if (result == CppRest::ApiResult::CPPREST_API_200)
 					{
 						//Return fresh OAuth token to user for storage
-						mResponse["access_token"] = wszOAuthToken;
-
-						std::map<std::wstring, std::wstring> mHeaders2(SParams->mHeaders);
-						mHeaders2[L"access_token"] = wszOAuthToken;
-						CppRest::SWinHttpParameters SParams2;
-						SParams2.bUseSSL = SParams->bUseSSL;
-						SParams2.mHeaders = mHeaders2;
-						SParams2.wszServer = SParams->wszServer;
-						SParams2.wszPath = SParams->wszPath;
-						SParams2.wszVerb = SParams->wszVerb;
-
-						result = CppRest::ApiRequest(&SParams2, mResponse, false);
+                        SParams.mResponse[L"access_token"].assign(SParams2.mResponse[L"access_token"]);
+						SParams.mHeaders[L"Authorization: Bearer "].assign(SParams2.mResponse[L"access_token"]);
+                        
+						result = CppRest::ApiRequest(&SParams, false);
 					}
 				}
 				break;
@@ -250,7 +247,7 @@ CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters* const SParams, 
 	// Report any errors.
 	if (!bResults)
 	{
-		DWORD dwLastError = GetLastError();
+		//DWORD dwLastError = GetLastError();
 		//printf("Error %d has occurred.\n", dwLastError);
 		result = CppRest::ApiResult::CPPREST_API_SERVERUNREACHABLE;
 	}
@@ -272,10 +269,8 @@ std::wstring Credentials2Base64(const std::wstring& wszEmail, const std::wstring
 	std::wstringstream os;
 	typedef boost::archive::iterators::base64_from_binary<    // convert binary values ot base64 characters
 		boost::archive::iterators::transform_width<   // retrieve 6 bit integers from a sequence of 8 bit bytes
-					const char *,
-					6,
-					8
-					>
+					const char *,6,8
+                    >
 				>
 				base64_text; // compose all the above operations in to a new iterator
 
@@ -287,30 +282,6 @@ std::wstring Credentials2Base64(const std::wstring& wszEmail, const std::wstring
 
 	return std::wstring(os.str());
 
-}
-/**
-* Connects to the token endpoint to get fresh OAuth token
-*/
-CppRest::ApiResult GetOAuthToken(const CppRest::SWinHttpParameters* const SParams, const std::wstring& wszEmail, const std::wstring& wszPassword, std::wstring& wszOAuthToken)
-{
-	std::wstring wszAuthHeader(Credentials2Base64(wszEmail,wszPassword));
-	std::map<std::wstring,std::wstring> mHeaders();
-	mHeaders[L"access_token"] = wszAuthHeader;
-
-	CppRest::SWinHttpParameters SParams2;
-	SParams2.bUseSSL = SParams->bUseSSL;
-	SParams2.wszVerb = L"POST";
-	SParams2.wszServer = SParams->wszServer;
-	SParams2.wszPath = L"/oauthtoken";
-	SParams2.mHeaders = mHeaders;
-	
-	std::map<std::wstring, std::wstring> mResponse;
-	CppRest::ApiResult result = CppRest::ApiRequest(&SParams2, mResponse, false);
-
-	if (result == CppRest::ApiResult::CPPREST_API_200)
-		wszOAuthToken.assign(mResponse[L"access_token"]);
-
-	return result;
 }
 
 void GetUserInput(HWND hWnd, int idInput, std::string& szInputString)
@@ -342,8 +313,7 @@ void GetUserInput(HWND hWnd, int idInput, std::string& szInputString)
 
 INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	static std::wstring* p_wszOAuthToken;
-	std::wstring wszOAuthToken;
+	static SWinHttpParameters* p_sParams;
 
 	std::wstring wszPassword("");
 	std::wstring wszEmail("");
@@ -353,8 +323,7 @@ INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 	switch (message)
 	{
 	case WM_INITDIALOG:
-		p_wszOAuthToken = reinterpret_cast<std::wstring*>(lParam);
-		wszOAuthToken.assign(*(p_wszOAuthToken));
+		p_sParams = reinterpret_cast<SWinHttpParameters*>(lParam);
 		return 1;
 	case WM_COMMAND:
 		switch (wParam)
@@ -368,7 +337,12 @@ INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 
 			GetUserInput(hDlg, IDC_EMAIL, wszEmail);
 
-			result = GetOAuthToken(wszEmail, wszPassword, wszOAuthToken);
+            p_sParams->wszPath.assign(L"/oauthtoken");
+            p_sParams->wszVerb.assign(L"POST");
+            p_sParams->mHeaders[L"Authorization"].assign(std::wstring(L"Bearer "))
+                .append(Credentials2Base64(wszEmail, wszPassword));
+
+            result = CppRest::ApiRequest(*p_sParams,false);
 
 			SetWindowText(hDlg, L"Login");
 
@@ -393,7 +367,6 @@ INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 				//EndDialog(hDlg, TRUE); //User banned ; but API should return OK and update with dummy license!
 				return 0;
 			case CppRest::ApiResult::CPPREST_API_200:
-				(*p_wszOAuthToken).assign(wszOAuthToken);
 				EndDialog(hDlg, result);
 				return 0;
 			default:
@@ -418,20 +391,16 @@ INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 * returns OAuthToken
 * returns true if login has been successful (200), false otherwise (cancel)
 */
-CppRest::ApiResult UserLogin(std::wstring& wszOAuthToken)
+CppRest::ApiResult UserLogin(const SWinHttpParameters& SParams)
 {
-	std::wstring wszTemp;
-
 	CppRest::ApiResult result = static_cast<CppRest::ApiResult>(
 		DialogBoxParam(GetModuleHandle(NULL),
 			MAKEINTRESOURCE(IDD_DIALOG1),
 			NULL,
 			LoginProc,
-			reinterpret_cast<LPARAM>(&wszTemp)
+			reinterpret_cast<LPARAM>(&SParams)
 			)
 		);
-
-	wszOAuthToken.assign(wszTemp);
 
 	return result <= 0 ? CppRest::ApiResult::CPPREST_USER_CANCEL : result; //-1 means DialogBox failed to display the form
 }

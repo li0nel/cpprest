@@ -1,43 +1,67 @@
 #include <windows.h>
 #include <winhttp.h>
 #include "cpprest.h"
+#include "resource.h"
 
 #include <sstream>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/archive/iterators/base64_from_binary.hpp>
-#include <boost/archive/iterators/transform_width.hpp>
 #include <boost/archive/iterators/ostream_iterator.hpp>
+#include <boost/foreach.hpp>
+#include <boost/archive/iterators/transform_width.hpp>
+
 
 #pragma comment(lib, "winhttp.lib")
 
-std::string map2json(const std::map<std::string, std::string>& map) {
+/**
+* Functions to give MultiByte strings to CryptoPP
+*/
+std::string to_mbstring(const std::wstring& input)
+{
+	return std::string(input.begin(), input.end());
+}
+
+std::wstring to_wstring(const std::string& input)
+{
+	return std::wstring(input.begin(), input.end());
+}
+
+std::wstring map2json(const std::map<std::wstring, std::wstring>& map) {
 	// Write JSON
 	boost::property_tree::ptree pt;
 	for (auto& entry : map)
-		pt.put(entry.first, entry.second);
+		pt.put(to_mbstring(entry.first), to_mbstring(entry.second));
 	std::ostringstream buf;
 	boost::property_tree::write_json(buf, pt, false);
-	return buf.str();
+	return to_wstring(buf.str());
 }
 
-std::map<std::string, std::string> json2map(const std::string& szJSON) {
+std::map<std::wstring, std::wstring> json2map(const std::wstring& wszJSON) {
 	// Read JSON
 	boost::property_tree::ptree pt2;
+	std::string szJSON(wszJSON.begin(), wszJSON.end());
 	std::istringstream is(szJSON);
-	boost::property_tree::read_json(is, pt2);
-	std::string foo = pt2.get<std::string>("foo");
-    
-    return;
+
+	std::map<std::wstring, std::wstring> result;
+
+	try {
+		boost::property_tree::read_json(is, pt2);
+	
+		BOOST_FOREACH(boost::property_tree::ptree::value_type &v, pt2)
+		{
+			result[to_wstring(v.first)] = to_wstring(v.second.data());
+		}
+	}
+	catch (...){}
+
+    return result;
 }
 
-CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters& SParams,
+CppRest::ApiResult CppRest::ApiRequest(CppRest::SWinHttpParameters& SParams,
                               bool bLoginUser)
 {
 	DWORD dwStatusCode = 0;
-	DWORD dwSupportedSchemes;
-	DWORD dwFirstScheme;
-	DWORD dwTarget;
 	DWORD dwLastStatus = 0;
 	DWORD dwSize = sizeof(DWORD);
 	BOOL  bResults = FALSE;
@@ -199,9 +223,9 @@ CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters& SParams,
 					{
 						//Return fresh OAuth token to user for storage
                         SParams.mResponse[L"access_token"].assign(SParams2.mResponse[L"access_token"]);
-						SParams.mHeaders[L"Authorization: Bearer "].assign(SParams2.mResponse[L"access_token"]);
-                        
-						result = CppRest::ApiRequest(&SParams, false);
+						SParams.mHeaders[L"Authorization"].assign(L"Bearer ").append(SParams2.mResponse[L"access_token"]);
+
+						result = CppRest::ApiRequest(SParams, false);
 					}
 				}
 				break;
@@ -257,7 +281,7 @@ CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters& SParams,
 	if (hConnect) WinHttpCloseHandle(hConnect);
 	if (hSession) WinHttpCloseHandle(hSession);
 
-	mResponse = json2map(szJSONResponse);
+	SParams.mResponse = json2map(to_wstring(szJSONResponse));
 
 	return result;
 }
@@ -266,7 +290,7 @@ std::wstring Credentials2Base64(const std::wstring& wszEmail, const std::wstring
 {
 	std::wstring wszToEncode(wszEmail+std::wstring(L":")+wszPassword);
 
-	std::wstringstream os;
+	std::stringstream os;
 	typedef boost::archive::iterators::base64_from_binary<    // convert binary values ot base64 characters
 		boost::archive::iterators::transform_width<   // retrieve 6 bit integers from a sequence of 8 bit bytes
 					const char *,6,8
@@ -274,17 +298,18 @@ std::wstring Credentials2Base64(const std::wstring& wszEmail, const std::wstring
 				>
 				base64_text; // compose all the above operations in to a new iterator
 
+	std::string szToEncode(wszToEncode.begin(), wszToEncode.end());
 	std::copy(
-		base64_text(wszToEncode.c_str()),
-		base64_text(wszToEncode.c_str() + wszToEncode.size()),
-		ostream_iterator<char>(os)
+		base64_text(szToEncode.c_str()),
+		base64_text(szToEncode.c_str() + wszToEncode.size()),
+		std::ostream_iterator<char>(os)
 		);
 
-	return std::wstring(os.str());
+	return std::wstring(to_wstring(os.str()));
 
 }
 
-void GetUserInput(HWND hWnd, int idInput, std::string& szInputString)
+void GetUserInput(HWND hWnd, int idInput, std::wstring& wszInputString)
 {
 	TCHAR lpszInput[256] = { 0 };
 	WORD cchInput;
@@ -308,22 +333,22 @@ void GetUserInput(HWND hWnd, int idInput, std::string& szInputString)
 
 	// Null-terminate the string. 
 	lpszInput[cchInput] = 0;
-	szInputString.assign(lpszInput);
+	wszInputString.assign(lpszInput);
 }
 
 INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	static SWinHttpParameters* p_sParams;
+	static CppRest::SWinHttpParameters* p_sParams;
 
-	std::wstring wszPassword("");
-	std::wstring wszEmail("");
+	std::wstring wszPassword(L"");
+	std::wstring wszEmail(L"");
 
 	CppRest::ApiResult result = CppRest::ApiResult::CPPREST_API_SERVERUNREACHABLE;
 
 	switch (message)
 	{
 	case WM_INITDIALOG:
-		p_sParams = reinterpret_cast<SWinHttpParameters*>(lParam);
+		p_sParams = reinterpret_cast<CppRest::SWinHttpParameters*>(lParam);
 		return 1;
 	case WM_COMMAND:
 		switch (wParam)
@@ -339,7 +364,7 @@ INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 
             p_sParams->wszPath.assign(L"/oauthtoken");
             p_sParams->wszVerb.assign(L"POST");
-            p_sParams->mHeaders[L"Authorization"].assign(std::wstring(L"Bearer "))
+            p_sParams->mHeaders[L"Authorization"].assign(std::wstring(L"Basic "))
                 .append(Credentials2Base64(wszEmail, wszPassword));
 
             result = CppRest::ApiRequest(*p_sParams,false);
@@ -391,7 +416,7 @@ INT_PTR CALLBACK LoginProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 * returns OAuthToken
 * returns true if login has been successful (200), false otherwise (cancel)
 */
-CppRest::ApiResult UserLogin(const SWinHttpParameters& SParams)
+CppRest::ApiResult UserLogin(CppRest::SWinHttpParameters& SParams)
 {
 	CppRest::ApiResult result = static_cast<CppRest::ApiResult>(
 		DialogBoxParam(GetModuleHandle(NULL),
@@ -402,5 +427,5 @@ CppRest::ApiResult UserLogin(const SWinHttpParameters& SParams)
 			)
 		);
 
-	return result <= 0 ? CppRest::ApiResult::CPPREST_USER_CANCEL : result; //-1 means DialogBox failed to display the form
+	return (result < 0) ? CppRest::ApiResult::CPPREST_USER_CANCEL : result; //-1 means DialogBox failed to display the form
 }

@@ -32,8 +32,10 @@ namespace CppRest
 		std::map<std::wstring,std::wstring> mResponse;
 	};
 
-	CppRest::ApiResult ApiRequest(const CppRest::SWinHttpParameters& SParams,
+	CppRest::ApiResult ApiRequest(CppRest::SWinHttpParameters& SParams,
                                   bool bLoginUser=true);
 }
 
-bool UserLogin(const CppRest::SWinHttpParameters& SParams);
+CppRest::ApiResult UserLogin(CppRest::SWinHttpParameters& SParams);
+
+std::string to_mbstring(const std::wstring& input);
